@@ -36,9 +36,9 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
       for (const chunk of addChunks) {
         const patches: PatchRequest[] = chunk.map(item => ({
           op: 'add',
-          path: '-',
+          path: '/-',
           value: {
-            stringId: item.stringId,
+            stringId: item.stringId as number,
             languageId: targetLang,
             text: item.text
           }
@@ -70,8 +70,8 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
             const updatedTargetMap = new Map<number, number>();
             updatedTargetResponse.data.forEach((item: any) => {
                 const t = item.data as StringTranslationsModel.PlainLanguageTranslation;
-                if (!updatedTargetMap.has(t.stringId)) {
-                    updatedTargetMap.set(t.stringId, t.translationId);
+                if (!updatedTargetMap.has(t.stringId as number)) {
+                    updatedTargetMap.set(t.stringId as number, t.translationId);
                 }
             });
             const approveChunks = chunkArray(toApprove, 100);
@@ -80,7 +80,7 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
                     const translationId = updatedTargetMap.get(stringId);
                     return {
                         op: 'add' as const,
-                        path: '-',
+                        path: '/-',
                         value: { translationId }
                     } as PatchRequest;
                 }).filter(p => p.value && p.value.translationId !== undefined) as PatchRequest[];
@@ -115,34 +115,37 @@ export const handleWebhookEvent = async (client: Client, event: any, rules: Rule
         if (event.event === 'suggestion.added' || event.event === 'suggestion.updated') {
            await client.stringTranslationsApi.translationBatchOperations(projectId, [{
                op: 'add',
-               path: '-',
+               path: '/-',
                value: {
-                   stringId: event.translation.string.id,
+                   stringId: event.translation.string.id as number,
                    languageId: targetLang,
                    text: event.translation.text
                }
            }]);
         } else if (event.event === 'suggestion.deleted') {
-           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id, targetLang);
+           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id as number, targetLang);
            if (targetTranslations.data.length > 0) {
                const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
                    op: 'remove',
                    path: `/${t.data.id}`
                }));
-               await client.stringTranslationsApi.translationBatchOperations(projectId, patches);
+               const deleteChunks = chunkArray(patches, 100);
+               for (const chunk of deleteChunks) {
+                   await client.stringTranslationsApi.translationBatchOperations(projectId, chunk);
+               }
            }
         } else if (rule.syncApprovals && event.event === 'suggestion.approved') {
-           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id, targetLang);
+           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id as number, targetLang);
            if (targetTranslations.data.length > 0) {
                const translationId = targetTranslations.data[0].data.id;
                await client.stringTranslationsApi.approvalBatchOperations(projectId, [{
                    op: 'add',
-                   path: '-',
+                   path: '/-',
                    value: { translationId }
                }]);
            }
         } else if (rule.syncApprovals && event.event === 'suggestion.disapproved') {
-           const approvalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { stringId: event.translation.string.id, languageId: targetLang });
+           const approvalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { stringId: event.translation.string.id as number, languageId: targetLang });
            if (approvalsRes.data.length > 0) {
                const patches: PatchRequest[] = approvalsRes.data.map((a: any) => ({
                    op: 'remove',
