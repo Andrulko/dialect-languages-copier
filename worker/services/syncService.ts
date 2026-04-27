@@ -1,4 +1,4 @@
-import { CrowdinApi, StringTranslationsModel, ResponseObject, PatchRequest } from '@crowdin/crowdin-api-client';
+import { Client, StringTranslationsModel, ResponseObject, PatchRequest } from '@crowdin/crowdin-api-client';
 import { Rule } from './rulesStore';
 const chunkArray = <T>(array: T[], size: number): T[][] => {
   const result: T[][] = [];
@@ -8,16 +8,16 @@ const chunkArray = <T>(array: T[], size: number): T[][] => {
   return result;
 };
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-export const syncRuleManual = async (client: CrowdinApi, projectId: number, rule: Rule) => {
+export const syncRuleManual = async (client: Client, projectId: number, rule: Rule) => {
   console.log(`[SyncService] Starting manual sync for project ${projectId}, rule: ${rule.id}`);
   try {
     // Fetch pivot translations
     const pivotResponse = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, rule.pivotLanguage);
-    const pivotTranslations = pivotResponse.data.map(item => item.data as StringTranslationsModel.PlainLanguageTranslation);
+    const pivotTranslations = pivotResponse.data.map((item: any) => item.data as StringTranslationsModel.PlainLanguageTranslation);
     for (const targetLang of rule.targetLanguages) {
       console.log(`[SyncService] Syncing to target language: ${targetLang}`);
       const targetResponse = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, targetLang);
-      const targetTranslations = targetResponse.data.map(item => item.data as StringTranslationsModel.PlainLanguageTranslation);
+      const targetTranslations = targetResponse.data.map((item: any) => item.data as StringTranslationsModel.PlainLanguageTranslation);
       const targetMap = new Map<number, StringTranslationsModel.PlainLanguageTranslation>();
       for (const t of targetTranslations) {
         if (!targetMap.has(t.stringId)) {
@@ -51,19 +51,19 @@ export const syncRuleManual = async (client: CrowdinApi, projectId: number, rule
       if (rule.syncApprovals) {
         const pivotApprovalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { languageId: rule.pivotLanguage });
         const targetApprovalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { languageId: targetLang });
-        const approvedStringIds = new Set(pivotApprovalsRes.data.map(a => a.data.stringId));
-        const targetApprovedStringIds = new Set(targetApprovalsRes.data.map(a => a.data.stringId));
+        const approvedStringIds = new Set<number>(pivotApprovalsRes.data.map((a: any) => a.data.stringId as number));
+        const targetApprovedStringIds = new Set<number>(targetApprovalsRes.data.map((a: any) => a.data.stringId as number));
         const toApprove: number[] = [];
         for (const stringId of approvedStringIds) {
-          if (!targetApprovedStringIds.has(stringId)) {
-            toApprove.push(stringId);
+          if (!targetApprovedStringIds.has(stringId as number)) {
+            toApprove.push(stringId as number);
           }
         }
         // We need the translation IDs in the target language to approve them
         if (toApprove.length > 0) {
             const updatedTargetResponse = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, targetLang);
             const updatedTargetMap = new Map<number, number>();
-            updatedTargetResponse.data.forEach(item => {
+            updatedTargetResponse.data.forEach((item: any) => {
                 const t = item.data as StringTranslationsModel.PlainLanguageTranslation;
                 if (!updatedTargetMap.has(t.stringId)) {
                     updatedTargetMap.set(t.stringId, t.translationId);
@@ -91,7 +91,7 @@ export const syncRuleManual = async (client: CrowdinApi, projectId: number, rule
     throw error;
   }
 };
-export const handleWebhookEvent = async (client: CrowdinApi, event: any, rules: Rule[]) => {
+export const handleWebhookEvent = async (client: Client, event: any, rules: Rule[]) => {
   console.log(`[SyncService] Handling webhook event`, event.event);
   const eventLang = event.translation?.targetLanguage?.id || event.targetLanguage?.id;
   if (!eventLang) return;
