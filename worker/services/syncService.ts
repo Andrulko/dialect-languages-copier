@@ -79,11 +79,11 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
                 const patches: PatchRequest[] = chunk.map(stringId => {
                     const translationId = updatedTargetMap.get(stringId);
                     return {
-                        op: 'add',
+                        op: 'add' as const,
                         path: '-',
                         value: { translationId }
-                    };
-                }).filter(p => p.value.translationId !== undefined);
+                    } as PatchRequest;
+                }).filter(p => p.value && p.value.translationId !== undefined) as PatchRequest[];
                 if (patches.length > 0) {
                     try {
                         await client.stringTranslationsApi.approvalBatchOperations(projectId, patches);
