@@ -35,7 +35,7 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
       const addChunks = chunkArray(toAdd, 100);
       for (const chunk of addChunks) {
         const patches: PatchRequest[] = chunk.map(item => ({
-          op: 'add',
+          op: 'add' as const,
           path: '/-',
           value: {
             stringId: item.stringId as number,
@@ -178,7 +178,7 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
           const chunks = chunkArray(toAddTranslations, 100);
           for (const chunk of chunks) {
               const patches: PatchRequest[] = chunk.map(item => ({
-                  op: 'add',
+                  op: 'add' as const,
                   path: '/-',
                   value: { stringId: item.stringId, languageId: targetLang, text: item.text }
               }));
@@ -197,7 +197,7 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
               try {
                   const targetTranslations = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, targetLang, chunk.join(','));
                   const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
-                      op: 'remove',
+                      op: 'remove' as const,
                       path: `/${t.data.id}`
                   }));
                   if (patches.length > 0) {
@@ -219,7 +219,7 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
               try {
                   const targetTranslations = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, targetLang, chunk.join(','));
                   const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
-                      op: 'add',
+                      op: 'add' as const,
                       path: '/-',
                       value: { translationId: t.data.translationId }
                   })).filter(p => p.value.translationId !== undefined);
@@ -245,7 +245,7 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
                       .filter((a: any) => chunk.includes(a.data.stringId))
                       .map((a: any) => a.data.id);
                   const patches: PatchRequest[] = approvalIdsToRemove.map((id: number) => ({
-                      op: 'remove',
+                      op: 'remove' as const,
                       path: `/${id}`
                   }));
                   if (patches.length > 0) {
