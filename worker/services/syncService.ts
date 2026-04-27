@@ -32,19 +32,24 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
         }
       }
       // Add missing/differing translations
-      const addChunks = chunkArray(toAdd, 50);
+      const addChunks = chunkArray(toAdd, 100);
       for (const chunk of addChunks) {
-        await Promise.all(chunk.map(async (item) => {
-          try {
-            await client.stringTranslationsApi.addTranslation(projectId, {
-              stringId: item.stringId,
-              languageId: targetLang,
-              text: item.text
-            });
-          } catch (e) {
-            console.error(`[SyncService] Failed to add translation for string ${item.stringId} to ${targetLang}`, e);
+        const patches: PatchRequest[] = chunk.map(item => ({
+          op: 'add',
+          path: '-',
+          value: {
+            stringId: item.stringId,
+            languageId: targetLang,
+            text: item.text
           }
         }));
+        if (patches.length > 0) {
+          try {
+            await client.stringTranslationsApi.translationBatchOperations(projectId, patches);
+          } catch (e) {
+            console.error(`[SyncService] Failed batch translations to ${targetLang}`, e);
+          }
+        }
         await delay(500); // Rate limiting mitigation
       }
       // Handle approvals
@@ -69,18 +74,23 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
                     updatedTargetMap.set(t.stringId, t.translationId);
                 }
             });
-            const approveChunks = chunkArray(toApprove, 50);
+            const approveChunks = chunkArray(toApprove, 100);
             for (const chunk of approveChunks) {
-                await Promise.all(chunk.map(async (stringId) => {
+                const patches: PatchRequest[] = chunk.map(stringId => {
                     const translationId = updatedTargetMap.get(stringId);
-                    if (translationId) {
-                        try {
-                            await client.stringTranslationsApi.addApproval(projectId, { translationId });
-                        } catch (e) {
-                             console.error(`[SyncService] Failed to add approval for translation ${translationId}`, e);
-                        }
+                    return {
+                        op: 'add',
+                        path: '-',
+                        value: { translationId }
+                    };
+                }).filter(p => p.value.translationId !== undefined);
+                if (patches.length > 0) {
+                    try {
+                        await client.stringTranslationsApi.approvalBatchOperations(projectId, patches);
+                    } catch (e) {
+                         console.error(`[SyncService] Failed batch approvals to ${targetLang}`, e);
                     }
-                }));
+                }
                 await delay(500);
             }
         }
@@ -103,22 +113,43 @@ export const handleWebhookEvent = async (client: Client, event: any, rules: Rule
     for (const targetLang of rule.targetLanguages) {
       try {
         if (event.event === 'suggestion.added' || event.event === 'suggestion.updated') {
-           await client.stringTranslationsApi.addTranslation(projectId, {
-             stringId: event.translation.string.id,
-             languageId: targetLang,
-             text: event.translation.text
-           });
+           await client.stringTranslationsApi.translationBatchOperations(projectId, [{
+               op: 'add',
+               path: '-',
+               value: {
+                   stringId: event.translation.string.id,
+                   languageId: targetLang,
+                   text: event.translation.text
+               }
+           }]);
         } else if (event.event === 'suggestion.deleted') {
-           await client.stringTranslationsApi.deleteAllTranslations(projectId, event.translation.string.id, targetLang);
+           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id, targetLang);
+           if (targetTranslations.data.length > 0) {
+               const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
+                   op: 'remove',
+                   path: `/${t.data.id}`
+               }));
+               await client.stringTranslationsApi.translationBatchOperations(projectId, patches);
+           }
         } else if (rule.syncApprovals && event.event === 'suggestion.approved') {
-           // Need to find the translation ID in the target language to approve
            const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id, targetLang);
            if (targetTranslations.data.length > 0) {
                const translationId = targetTranslations.data[0].data.id;
-               await client.stringTranslationsApi.addApproval(projectId, { translationId });
+               await client.stringTranslationsApi.approvalBatchOperations(projectId, [{
+                   op: 'add',
+                   path: '-',
+                   value: { translationId }
+               }]);
            }
         } else if (rule.syncApprovals && event.event === 'suggestion.disapproved') {
-           await client.stringTranslationsApi.removeStringApprovals(projectId, event.translation.string.id);
+           const approvalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { stringId: event.translation.string.id, languageId: targetLang });
+           if (approvalsRes.data.length > 0) {
+               const patches: PatchRequest[] = approvalsRes.data.map((a: any) => ({
+                   op: 'remove',
+                   path: `/${a.data.id}`
+               }));
+               await client.stringTranslationsApi.approvalBatchOperations(projectId, patches);
+           }
         }
       } catch (e) {
          console.error(`[SyncService] Failed to process webhook event ${event.event} for language ${targetLang}`, e);
