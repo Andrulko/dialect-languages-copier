@@ -1,6 +1,6 @@
 # Crowdin Project Tools App
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Andrulko/dialect-languages-copier)
 
 A modern, full-stack Crowdin application built with Cloudflare Workers, React, and Tailwind CSS. This template provides a robust starting point for building Project Tools modules for Crowdin, leveraging Cloudflare's serverless infrastructure for optimal performance.
 
@@ -59,7 +59,7 @@ The application will be available at `http://localhost:3000` (or your configured
 
 You can deploy this application directly to Cloudflare using the button below:
 
-[cloudflarebutton]
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Andrulko/dialect-languages-copier)
 
 ### Manual Deployment
 
