@@ -122,12 +122,17 @@ export function createApp({
             const projectId = connection.context.jwtPayload.context.project_id;
             const rules = await getRules(crowdinApp, orgId, projectId, connection.context.crowdinId);
             const newRule: Rule = {
-                id: crypto.randomUUID(),
+                id: req.body.id || crypto.randomUUID(),
                 pivotLanguage: req.body.pivotLanguage,
                 targetLanguages: req.body.targetLanguages,
                 syncApprovals: req.body.syncApprovals
             };
-            rules.push(newRule);
+            const existingIndex = rules.findIndex(r => r.id === newRule.id);
+            if (existingIndex >= 0) {
+                rules[existingIndex] = newRule;
+            } else {
+                rules.push(newRule);
+            }
             await saveRules(crowdinApp, orgId, projectId, connection.context.crowdinId, rules);
             res.json(newRule);
         } catch (error) {
