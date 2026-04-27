@@ -7,15 +7,18 @@ import {
   createHashRouter,
   RouterProvider,
 } from "react-router-dom";
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
+import { ErrorBoundary } from '@/components/ErrorBoundary';import { RouteErrorBoundary } from '@/components/RouteErrorBoundary';
 import '@/index.css'
 import { HomePage } from '@/pages/HomePage'
-
+import { AppLayout } from '@/components/layout/AppLayout'
 const router = createHashRouter([
   {
     path: "/",
-    element: <HomePage />,
+    element: (
+      <AppLayout>
+        <HomePage />
+      </AppLayout>
+    ),
     errorElement: <RouteErrorBoundary />,
   },
 ]);
