@@ -1,0 +1,43 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "dialect-languages-co-a8i33sjw0abhpeggawyny",
+	"main": "worker/index.ts",
+	"compatibility_date": "2025-07-30",
+	"compatibility_flags": ["nodejs_compat", "enable_nodejs_http_modules", "enable_nodejs_http_server_modules"],
+	"observability": {
+		"enabled": true
+	},
+	"assets": {
+		"binding": "ASSETS",
+		"run_worker_first": ["/*", "!/@*", "!/src/*", "!/node_modules/*"]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "crowdin-app-db",
+			"database_id": "{{D1_ID}}"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KVStore",
+			"id": "{{KV_ID}}"
+		}
+	],
+	"triggers": {
+		"crons": [
+			"0 * * * *",
+			"0 */3 * * *",
+			"0 */6 * * *",
+			"0 */12 * * *",
+			"0 0 * * *",
+			"0 0 * * SUN",
+			"0 0 1 * *"
+		]
+	},
+	"vars": {
+		"CROWDIN_CLIENT_ID": "{{CROWDIN_CLIENT_ID}}",
+		"CROWDIN_CLIENT_SECRET": "{{CROWDIN_CLIENT_SECRET}}",
+		"SCHEDULED_SECRET": "{{SCHEDULED_SECRET}}"
+	}
+}
