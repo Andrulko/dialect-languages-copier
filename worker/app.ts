@@ -77,12 +77,26 @@ export function createApp({
     const crowdinApp = crowdinModule.addCrowdinEndpoints(app, configuration) as CrowdinAppUtilities;
     app.get('/api/languages', async (req: Request, res: Response) => {
         try {
-            res.json([
-                { id: 'en', name: 'English' },
-                { id: 'fr', name: 'French' },
-                { id: 'fr-CA', name: 'French, Canadian' }
-            ]);
+            const jwt = req.query.jwt as string;
+            if (!jwt) return res.status(400).json({ error: 'JWT token is required' });
+            const connection = await crowdinApp.establishCrowdinConnection(jwt, undefined);
+            if (!connection.client) {
+                return res.status(500).json({ error: 'Failed to establish Crowdin API client' });
+            }
+            const projectId = connection.context.jwtPayload.context.project_id;
+            const projectResponse = await connection.client.projectsGroupsApi.getProject(projectId);
+            const project = projectResponse.data;
+            const projectLanguages = new Set([project.sourceLanguageId, ...(project.targetLanguageIds || [])]);
+            const languagesResponse = await connection.client.languagesApi.withFetchAll().listSupportedLanguages();
+            const languages = languagesResponse.data
+                .filter((langItem: any) => projectLanguages.has(langItem.data.id))
+                .map((langItem: any) => ({
+                    id: langItem.data.id,
+                    name: langItem.data.name
+                }));
+            res.json(languages);
         } catch (error) {
+            console.error('Error fetching languages:', error);
             res.status(500).json({ error: 'Failed to fetch languages' });
         }
     });
