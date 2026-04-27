@@ -4,7 +4,7 @@ import { RuleCard } from '@/components/RuleCard';
 import { RuleDialog } from '@/components/RuleDialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, RefreshCw } from 'lucide-react';
 export function HomePage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [languages, setLanguages] = useState<Language[]>([]);
@@ -25,7 +25,13 @@ export function HomePage() {
   const handleSaveRule = async (ruleData: Partial<Rule>) => {
     try {
       const newRule = await saveRule(ruleData);
-      setRules(prev => [...prev.filter(r => r.id !== newRule.id), newRule]);
+      setRules(prev => {
+        const exists = prev.some(r => r.id === newRule.id);
+        if (exists) {
+          return prev.map(r => r.id === newRule.id ? newRule : r);
+        }
+        return [...prev, newRule];
+      });
       toast.success('Rule saved successfully');
       setDialogOpen(false);
     } catch (e: any) {
@@ -50,7 +56,13 @@ export function HomePage() {
     }
   };
   if (loading) {
-    return <div className="p-8 text-center text-muted-foreground">Loading rules...</div>;
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="py-8 md:py-10 lg:py-12 flex justify-center">
+          <RefreshCw className="w-8 h-8 text-muted-foreground animate-spin" />
+        </div>
+      </div>
+    );
   }
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -73,7 +85,9 @@ export function HomePage() {
             <p className="text-muted-foreground mt-1 max-w-sm mx-auto mb-6">
               Create a rule to start copying translations from your pivot language to dialects automatically.
             </p>
-            <Button variant="outline" onClick={() => setDialogOpen(true)}>Create First Rule</Button>
+            <Button variant="outline" onClick={() => { setEditingRule(undefined); setDialogOpen(true); }}>
+              Create First Rule
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
