@@ -3,7 +3,7 @@ import type { AssetsConfig, FileStore, Cron, ClientConfig, CrowdinAppUtilities }
 import type { D1StorageConfig } from '@crowdin/app-project-module/out/storage/d1';
 import { Request, Response } from 'express';
 import { getRules, saveRules, Rule } from './services/rulesStore';
-import { syncRuleManual, handleWebhookEvent } from './services/syncService';
+import { syncRuleManual, handleBatchedWebhookEvents } from './services/syncService';
 export function createApp({
     app,
     clientId,
@@ -56,14 +56,38 @@ export function createApp({
                     try {
                         const orgId = webhookContext.organizationId;
                         const crowdinId = `${webhookContext.domain || orgId}`;
+                        // Group events by projectId
+                        const eventsByProject = new Map<number, any[]>();
                         for (const event of events) {
                             const projectId = (event as any).translation?.string?.project?.id || (event as any).project?.id;
                             if (!projectId) continue;
-                            const key = `org_${orgId}_project_${projectId}_dialect_rules`;
-                            const rulesData = await crowdinModule.metadataStore.getMetadata(key);
+                            if (!eventsByProject.has(projectId)) {
+                                eventsByProject.set(projectId, []);
+                            }
+                            eventsByProject.get(projectId)!.push(event);
+                        }
+                        for (const [projectId, projectEvents] of eventsByProject.entries()) {
+                            const queueKey = `org_${orgId}_project_${projectId}_webhook_queue`;
+                            const lockKey = `org_${orgId}_project_${projectId}_webhook_lock`;
+                            const rulesKey = `org_${orgId}_project_${projectId}_dialect_rules`;
+                            const rulesData = await crowdinModule.metadataStore.getMetadata(rulesKey);
                             const rules = rulesData ? (rulesData as Rule[]) : [];
-                            if (rules.length > 0) {
-                                await handleWebhookEvent(client, event, rules);
+                            if (rules.length === 0) continue;
+                            const existingQueueData = await crowdinModule.metadataStore.getMetadata(queueKey);
+                            const currentQueue = existingQueueData ? (existingQueueData as any[]) : [];
+                            currentQueue.push(...projectEvents);
+                            await crowdinModule.metadataStore.saveMetadata(queueKey, currentQueue, crowdinId);
+                            const lockData = await crowdinModule.metadataStore.getMetadata(lockKey);
+                            if (!lockData) {
+                                await crowdinModule.metadataStore.saveMetadata(lockKey, { locked: true, time: Date.now() }, crowdinId);
+                                await new Promise(resolve => setTimeout(resolve, 60000));
+                                const finalQueueData = await crowdinModule.metadataStore.getMetadata(queueKey);
+                                const finalQueue = finalQueueData ? (finalQueueData as any[]) : [];
+                                await crowdinModule.metadataStore.deleteMetadata(queueKey);
+                                await crowdinModule.metadataStore.deleteMetadata(lockKey);
+                                if (finalQueue.length > 0) {
+                                    await handleBatchedWebhookEvents(client, projectId, finalQueue, rules);
+                                }
                             }
                         }
                     } catch (error) {

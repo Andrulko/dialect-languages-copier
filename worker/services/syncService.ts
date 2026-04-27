@@ -101,62 +101,164 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
     throw error;
   }
 };
-export const handleWebhookEvent = async (client: Client, event: any, rules: Rule[]) => {
-  console.log(`[SyncService] Handling webhook event`, event.event);
-  const eventLang = event.translation?.targetLanguage?.id || event.targetLanguage?.id;
-  if (!eventLang) return;
-  const projectId = event.translation?.string?.project?.id || event.project?.id;
-  if (!projectId) return;
-  const applicableRules = rules.filter(r => r.pivotLanguage === eventLang);
-  if (applicableRules.length === 0) return;
-  for (const rule of applicableRules) {
-    for (const targetLang of rule.targetLanguages) {
-      try {
-        if (event.event === 'suggestion.added' || event.event === 'suggestion.updated') {
-           await client.stringTranslationsApi.translationBatchOperations(projectId, [{
-               op: 'add',
-               path: '/-',
-               value: {
-                   stringId: event.translation.string.id as number,
-                   languageId: targetLang,
-                   text: event.translation.text
-               }
-           }]);
-        } else if (event.event === 'suggestion.deleted') {
-           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id as number, targetLang);
-           if (targetTranslations.data.length > 0) {
-               const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
-                   op: 'remove',
-                   path: `/${t.data.id}`
-               }));
-               const deleteChunks = chunkArray(patches, 100);
-               for (const chunk of deleteChunks) {
-                   await client.stringTranslationsApi.translationBatchOperations(projectId, chunk);
-               }
-           }
-        } else if (rule.syncApprovals && event.event === 'suggestion.approved') {
-           const targetTranslations = await client.stringTranslationsApi.listStringTranslations(projectId, event.translation.string.id as number, targetLang);
-           if (targetTranslations.data.length > 0) {
-               const translationId = targetTranslations.data[0].data.id;
-               await client.stringTranslationsApi.approvalBatchOperations(projectId, [{
-                   op: 'add',
-                   path: '/-',
-                   value: { translationId }
-               }]);
-           }
-        } else if (rule.syncApprovals && event.event === 'suggestion.disapproved') {
-           const approvalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { stringId: event.translation.string.id as number, languageId: targetLang });
-           if (approvalsRes.data.length > 0) {
-               const patches: PatchRequest[] = approvalsRes.data.map((a: any) => ({
-                   op: 'remove',
-                   path: `/${a.data.id}`
-               }));
-               await client.stringTranslationsApi.approvalBatchOperations(projectId, patches);
-           }
+type ConsolidatedAction = {
+    addTranslation?: { text: string };
+    deleteTranslation?: boolean;
+    addApproval?: boolean;
+    removeApproval?: boolean;
+};
+export const handleBatchedWebhookEvents = async (client: Client, projectId: number, events: any[], rules: Rule[]) => {
+  console.log(`[SyncService] Handling batched webhook events for project ${projectId}. Total events: ${events.length}`);
+  // Group events by target language
+  const actionsByTargetLang = new Map<string, Map<number, ConsolidatedAction>>();
+  for (const event of events) {
+    const eventLang = event.translation?.targetLanguage?.id || event.targetLanguage?.id;
+    if (!eventLang) continue;
+    const stringId = event.translation?.string?.id;
+    if (!stringId) continue;
+    const applicableRules = rules.filter(r => r.pivotLanguage === eventLang);
+    for (const rule of applicableRules) {
+      for (const targetLang of rule.targetLanguages) {
+        if (!actionsByTargetLang.has(targetLang)) {
+            actionsByTargetLang.set(targetLang, new Map());
         }
-      } catch (e) {
-         console.error(`[SyncService] Failed to process webhook event ${event.event} for language ${targetLang}`, e);
+        const stringActions = actionsByTargetLang.get(targetLang)!;
+        if (!stringActions.has(stringId)) {
+            stringActions.set(stringId, {});
+        }
+        const action = stringActions.get(stringId)!;
+        switch (event.event) {
+            case 'suggestion.added':
+            case 'suggestion.updated':
+                action.addTranslation = { text: event.translation.text };
+                action.deleteTranslation = false;
+                break;
+            case 'suggestion.deleted':
+                action.deleteTranslation = true;
+                action.addTranslation = undefined;
+                action.addApproval = false;
+                break;
+            case 'suggestion.approved':
+                if (rule.syncApprovals) {
+                    action.addApproval = true;
+                    action.removeApproval = false;
+                }
+                break;
+            case 'suggestion.disapproved':
+                if (rule.syncApprovals) {
+                    action.removeApproval = true;
+                    action.addApproval = false;
+                }
+                break;
+        }
       }
     }
+  }
+  for (const [targetLang, stringActions] of actionsByTargetLang.entries()) {
+      const toAddTranslations: { stringId: number, text: string }[] = [];
+      const toDeleteTranslations: number[] = [];
+      const toAddApprovals: number[] = [];
+      const toRemoveApprovals: number[] = [];
+      for (const [stringId, action] of stringActions.entries()) {
+          if (action.addTranslation) {
+              toAddTranslations.push({ stringId, text: action.addTranslation.text });
+          }
+          if (action.deleteTranslation) {
+              toDeleteTranslations.push(stringId);
+          }
+          if (action.addApproval) {
+              toAddApprovals.push(stringId);
+          }
+          if (action.removeApproval) {
+              toRemoveApprovals.push(stringId);
+          }
+      }
+      // Process Translation Additions
+      if (toAddTranslations.length > 0) {
+          const chunks = chunkArray(toAddTranslations, 100);
+          for (const chunk of chunks) {
+              const patches: PatchRequest[] = chunk.map(item => ({
+                  op: 'add',
+                  path: '/-',
+                  value: { stringId: item.stringId, languageId: targetLang, text: item.text }
+              }));
+              try {
+                  await client.stringTranslationsApi.translationBatchOperations(projectId, patches);
+              } catch (e) {
+                  console.error(`[SyncService] Failed batch translations add to ${targetLang}`, e);
+              }
+              await delay(500);
+          }
+      }
+      // Process Translation Deletions
+      if (toDeleteTranslations.length > 0) {
+          const chunks = chunkArray(toDeleteTranslations, 100);
+          for (const chunk of chunks) {
+              try {
+                  const targetTranslations = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, targetLang, chunk.join(','));
+                  const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
+                      op: 'remove',
+                      path: `/${t.data.id}`
+                  }));
+                  if (patches.length > 0) {
+                      const patchChunks = chunkArray(patches, 100);
+                      for (const pChunk of patchChunks) {
+                          await client.stringTranslationsApi.translationBatchOperations(projectId, pChunk);
+                          await delay(500);
+                      }
+                  }
+              } catch (e) {
+                  console.error(`[SyncService] Failed batch translations remove to ${targetLang}`, e);
+              }
+          }
+      }
+      // Process Approvals Additions
+      if (toAddApprovals.length > 0) {
+          const chunks = chunkArray(toAddApprovals, 100);
+          for (const chunk of chunks) {
+              try {
+                  const targetTranslations = await client.stringTranslationsApi.withFetchAll().listLanguageTranslations(projectId, targetLang, chunk.join(','));
+                  const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
+                      op: 'add',
+                      path: '/-',
+                      value: { translationId: t.data.translationId }
+                  })).filter(p => p.value.translationId !== undefined);
+                  if (patches.length > 0) {
+                      const patchChunks = chunkArray(patches, 100);
+                      for (const pChunk of patchChunks) {
+                          await client.stringTranslationsApi.approvalBatchOperations(projectId, pChunk);
+                          await delay(500);
+                      }
+                  }
+              } catch (e) {
+                  console.error(`[SyncService] Failed batch approvals add to ${targetLang}`, e);
+              }
+          }
+      }
+      // Process Approvals Deletions
+      if (toRemoveApprovals.length > 0) {
+          const chunks = chunkArray(toRemoveApprovals, 100);
+          for (const chunk of chunks) {
+              try {
+                  const approvalsRes = await client.stringTranslationsApi.withFetchAll().listTranslationApprovals(projectId, { languageId: targetLang });
+                  const approvalIdsToRemove = approvalsRes.data
+                      .filter((a: any) => chunk.includes(a.data.stringId))
+                      .map((a: any) => a.data.id);
+                  const patches: PatchRequest[] = approvalIdsToRemove.map((id: number) => ({
+                      op: 'remove',
+                      path: `/${id}`
+                  }));
+                  if (patches.length > 0) {
+                      const patchChunks = chunkArray(patches, 100);
+                      for (const pChunk of patchChunks) {
+                          await client.stringTranslationsApi.approvalBatchOperations(projectId, pChunk);
+                          await delay(500);
+                      }
+                  }
+              } catch (e) {
+                  console.error(`[SyncService] Failed batch approvals remove to ${targetLang}`, e);
+              }
+          }
+      }
   }
 };
