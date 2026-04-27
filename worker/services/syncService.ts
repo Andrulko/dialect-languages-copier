@@ -38,7 +38,7 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
           op: 'add' as const,
           path: '/-',
           value: {
-            stringId: item.stringId as number,
+            stringId: parseInt(String(item.stringId), 10),
             languageId: targetLang,
             text: item.text
           }
@@ -81,7 +81,7 @@ export const syncRuleManual = async (client: Client, projectId: number, rule: Ru
                     return {
                         op: 'add' as const,
                         path: '/-',
-                        value: { translationId }
+                        value: { translationId: translationId !== undefined ? parseInt(String(translationId), 10) : undefined }
                     } as PatchRequest;
                 }).filter(p => p.value && p.value.translationId !== undefined) as PatchRequest[];
                 if (patches.length > 0) {
@@ -114,8 +114,9 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
   for (const event of events) {
     const eventLang = event.translation?.targetLanguage?.id || event.targetLanguage?.id;
     if (!eventLang) continue;
-    const stringId = event.translation?.string?.id;
-    if (!stringId) continue;
+    const stringIdRaw = event.translation?.string?.id;
+    if (!stringIdRaw) continue;
+    const stringId = parseInt(String(stringIdRaw), 10);
     const applicableRules = rules.filter(r => r.pivotLanguage === eventLang);
     for (const rule of applicableRules) {
       for (const targetLang of rule.targetLanguages) {
@@ -161,16 +162,16 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
       const toRemoveApprovals: number[] = [];
       for (const [stringId, action] of stringActions.entries()) {
           if (action.addTranslation) {
-              toAddTranslations.push({ stringId, text: action.addTranslation.text });
+              toAddTranslations.push({ stringId: parseInt(String(stringId), 10), text: action.addTranslation.text });
           }
           if (action.deleteTranslation) {
-              toDeleteTranslations.push(stringId);
+              toDeleteTranslations.push(parseInt(String(stringId), 10));
           }
           if (action.addApproval) {
-              toAddApprovals.push(stringId);
+              toAddApprovals.push(parseInt(String(stringId), 10));
           }
           if (action.removeApproval) {
-              toRemoveApprovals.push(stringId);
+              toRemoveApprovals.push(parseInt(String(stringId), 10));
           }
       }
       // Process Translation Additions
@@ -180,7 +181,7 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
               const patches: PatchRequest[] = chunk.map(item => ({
                   op: 'add' as const,
                   path: '/-',
-                  value: { stringId: item.stringId, languageId: targetLang, text: item.text }
+                  value: { stringId: parseInt(String(item.stringId), 10), languageId: targetLang, text: item.text }
               }));
               try {
                   await client.stringTranslationsApi.translationBatchOperations(projectId, patches);
@@ -221,7 +222,7 @@ export const handleBatchedWebhookEvents = async (client: Client, projectId: numb
                   const patches: PatchRequest[] = targetTranslations.data.map((t: any) => ({
                       op: 'add' as const,
                       path: '/-',
-                      value: { translationId: t.data.translationId }
+                      value: { translationId: t.data.translationId !== undefined ? parseInt(String(t.data.translationId), 10) : undefined }
                   })).filter(p => p.value.translationId !== undefined);
                   if (patches.length > 0) {
                       const patchChunks = chunkArray(patches, 100);
