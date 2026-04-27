@@ -1,123 +1,101 @@
-// Home page of the app.
-// Currently a demo placeholder "please wait" screen.
-// Replace this file with your actual app UI. Do not delete it to use some other file as homepage. Simply replace the entire contents of this file.
-
-import { useEffect, useMemo, useState } from 'react'
-import { Sparkles } from 'lucide-react'
-
-import { Button } from '@/components/ui/button'
-import { Toaster, toast } from '@/components/ui/sonner'
-
-function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
+import React, { useEffect, useState } from 'react';
+import { getRules, getLanguages, Rule, Language, deleteRule, triggerManualSync, saveRule } from '@/lib/api';
+import { RuleCard } from '@/components/RuleCard';
+import { RuleDialog } from '@/components/RuleDialog';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import { PlusCircle } from 'lucide-react';
 export function HomePage() {
-  const [coins, setCoins] = useState(0)
-  const [isRunning, setIsRunning] = useState(false)
-  const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [elapsedMs, setElapsedMs] = useState(0)
-
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<Rule | undefined>(undefined);
   useEffect(() => {
-    if (!isRunning || startedAt === null) return
-
-    const t = setInterval(() => {
-      setElapsedMs(Date.now() - startedAt)
-    }, 250)
-
-    return () => clearInterval(t)
-  }, [isRunning, startedAt])
-
-  const formatted = useMemo(() => formatDuration(elapsedMs), [elapsedMs])
-
-  const onPleaseWait = () => {
-    setCoins((c) => c + 1)
-
-    if (!isRunning) {
-      // Resume from the current elapsed time
-      setStartedAt(Date.now() - elapsedMs)
-      setIsRunning(true)
-      toast.success('Building your app…', {
-        description: "Hang tight — we're setting everything up.",
-      })
-      return
+    Promise.all([
+      getRules().catch(() => []),
+      getLanguages().catch(() => [])
+    ]).then(([r, l]) => {
+      setRules(r);
+      setLanguages(l);
+    }).finally(() => {
+      setLoading(false);
+    });
+  }, []);
+  const handleSaveRule = async (ruleData: Partial<Rule>) => {
+    try {
+      const newRule = await saveRule(ruleData);
+      setRules(prev => [...prev.filter(r => r.id !== newRule.id), newRule]);
+      toast.success('Rule saved successfully');
+      setDialogOpen(false);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save rule');
     }
-
-    setIsRunning(false)
-    toast.info('Still working…', {
-      description: 'You can come back in a moment.',
-    })
+  };
+  const handleDeleteRule = async (id: string) => {
+    try {
+      await deleteRule(id);
+      setRules(prev => prev.filter(r => r.id !== id));
+      toast.success('Rule deleted');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete rule');
+    }
+  };
+  const handleSyncRule = async (id: string) => {
+    try {
+      await triggerManualSync(id);
+      toast.success('Manual sync completed successfully');
+    } catch (e: any) {
+      toast.error(e.message || 'Sync failed');
+    }
+  };
+  if (loading) {
+    return <div className="p-8 text-center text-muted-foreground">Loading rules...</div>;
   }
-
-  const onReset = () => {
-    setCoins(0)
-    setIsRunning(false)
-    setStartedAt(null)
-    setElapsedMs(0)
-    toast('Reset complete')
-  }
-
-  const onAddCoin = () => {
-    setCoins((c) => c + 1)
-    toast('Coin added')
-  }
-
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-4 overflow-hidden relative">
-      <div className="absolute inset-0 bg-gradient-rainbow opacity-10 dark:opacity-20 pointer-events-none" />
-
-      <div className="text-center space-y-8 relative z-10 animate-fade-in w-full">
-        <div className="flex justify-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-primary floating">
-            <Sparkles className="w-8 h-8 text-white rotating" />
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <h1 className="text-5xl md:text-7xl font-display font-bold text-balance leading-tight">
-            Creating your <span className="text-gradient">app</span>
-          </h1>
-          <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto text-pretty">
-            Your application would be ready soon.
-          </p>
-        </div>
-
-        <div className="flex justify-center gap-4">
-          <Button
-            size="lg"
-            onClick={onPleaseWait}
-            className="btn-gradient px-8 py-4 text-lg font-semibold hover:-translate-y-0.5 transition-all duration-200"
-            aria-live="polite"
-          >
-            Please Wait
-          </Button>
-        </div>
-
-        <div className="flex items-center justify-center gap-6 text-sm text-muted-foreground">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="py-8 md:py-10 lg:py-12">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
-            Time elapsed:{' '}
-            <span className="font-medium tabular-nums text-foreground">{formatted}</span>
+            <h1 className="text-3xl font-display font-bold text-foreground">Dialect Sync Rules</h1>
+            <p className="text-muted-foreground mt-1 text-sm">Automate your translation updates across dialects.</p>
           </div>
-          <div>
-            Coins:{' '}
-            <span className="font-medium tabular-nums text-foreground">{coins}</span>
-          </div>
-        </div>
-
-        <div className="flex justify-center gap-2">
-          <Button variant="outline" size="sm" onClick={onReset}>
-            Reset
-          </Button>
-          <Button variant="outline" size="sm" onClick={onAddCoin}>
-            Add Coin
+          <Button onClick={() => { setEditingRule(undefined); setDialogOpen(true); }} className="bg-gradient-primary">
+            <PlusCircle className="w-4 h-4 mr-2" /> Create Rule
           </Button>
         </div>
+        {rules.length === 0 ? (
+          <div className="text-center py-16 bg-card rounded-xl border border-border/50 shadow-sm">
+            <div className="w-16 h-16 bg-secondary rounded-full flex items-center justify-center mx-auto mb-4">
+              <RefreshCw className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg font-semibold text-foreground">No sync rules yet</h3>
+            <p className="text-muted-foreground mt-1 max-w-sm mx-auto mb-6">
+              Create a rule to start copying translations from your pivot language to dialects automatically.
+            </p>
+            <Button variant="outline" onClick={() => setDialogOpen(true)}>Create First Rule</Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {rules.map(rule => (
+              <RuleCard
+                key={rule.id}
+                rule={rule}
+                onEdit={() => { setEditingRule(rule); setDialogOpen(true); }}
+                onDelete={() => handleDeleteRule(rule.id)}
+                onSync={() => handleSyncRule(rule.id)}
+              />
+            ))}
+          </div>
+        )}
+        <RuleDialog
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          languages={languages}
+          onSave={handleSaveRule}
+          initialData={editingRule}
+        />
       </div>
-
-      <Toaster richColors closeButton />
     </div>
-  )
+  );
 }
