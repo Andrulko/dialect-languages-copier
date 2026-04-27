@@ -54,7 +54,18 @@ export function createApp({
                 ],
                 async callback({ client, events, webhookContext }) {
                     try {
-                        console.log(`Received ${events.length} webhook events`);
+                        const orgId = webhookContext.organizationId;
+                        const crowdinId = `${webhookContext.domain || orgId}`;
+                        for (const event of events) {
+                            const projectId = (event as any).translation?.string?.project?.id || (event as any).project?.id;
+                            if (!projectId) continue;
+                            const key = `org_${orgId}_project_${projectId}_dialect_rules`;
+                            const rulesData = await crowdinModule.metadataStore.getMetadata(key);
+                            const rules = rulesData ? (rulesData as Rule[]) : [];
+                            if (rules.length > 0) {
+                                await handleWebhookEvent(client, event, rules);
+                            }
+                        }
                     } catch (error) {
                         console.error('Error processing webhooks:', error);
                     }
@@ -78,6 +89,7 @@ export function createApp({
     app.get('/api/rules', async (req: Request, res: Response) => {
         try {
             const jwt = req.query.jwt as string;
+            if (!jwt) return res.status(400).json({ error: 'JWT token is required' });
             const connection = await crowdinApp.establishCrowdinConnection(jwt, undefined);
             const orgId = connection.context.jwtPayload.context.organization_id;
             const projectId = connection.context.jwtPayload.context.project_id;
@@ -90,6 +102,7 @@ export function createApp({
     app.post('/api/rules', async (req: Request, res: Response) => {
         try {
             const jwt = req.query.jwt as string;
+            if (!jwt) return res.status(400).json({ error: 'JWT token is required' });
             const connection = await crowdinApp.establishCrowdinConnection(jwt, undefined);
             const orgId = connection.context.jwtPayload.context.organization_id;
             const projectId = connection.context.jwtPayload.context.project_id;
@@ -110,6 +123,7 @@ export function createApp({
     app.delete('/api/rules/:id', async (req: Request, res: Response) => {
         try {
             const jwt = req.query.jwt as string;
+            if (!jwt) return res.status(400).json({ error: 'JWT token is required' });
             const connection = await crowdinApp.establishCrowdinConnection(jwt, undefined);
             const orgId = connection.context.jwtPayload.context.organization_id;
             const projectId = connection.context.jwtPayload.context.project_id;
@@ -123,8 +137,24 @@ export function createApp({
     });
     app.post('/api/sync/:id', async (req: Request, res: Response) => {
         try {
-            res.json({ success: true });
+            const jwt = req.query.jwt as string;
+            if (!jwt) return res.status(400).json({ error: 'JWT token is required' });
+            const connection = await crowdinApp.establishCrowdinConnection(jwt, undefined);
+            const orgId = connection.context.jwtPayload.context.organization_id;
+            const projectId = connection.context.jwtPayload.context.project_id;
+            const rules = await getRules(crowdinApp, orgId, projectId, connection.context.crowdinId);
+            const rule = rules.find(r => r.id === req.params.id);
+            if (!rule) {
+                return res.status(404).json({ error: 'Rule not found' });
+            }
+            if (connection.client) {
+                await syncRuleManual(connection.client, projectId, rule);
+                res.json({ success: true });
+            } else {
+                res.status(500).json({ error: 'Failed to establish Crowdin API client' });
+            }
         } catch (error) {
+            console.error('Error during manual sync:', error);
             res.status(500).json({ error: 'Failed to trigger sync' });
         }
     });
